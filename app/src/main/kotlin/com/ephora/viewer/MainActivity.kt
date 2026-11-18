@@ -72,20 +72,9 @@ class MainActivity : AppCompatActivity(), SurfaceHolder.Callback {
     private var dragging = false
 
     private val choreographer = Choreographer.getInstance()
-    private val frameCallback: Choreographer.FrameCallback = Choreographer.FrameCallback { frameTimeNanos ->
-        choreographer.postFrameCallback(frameCallback)
-        if (!dragging) {
-            azimuth += AUTO_ROTATE_SPEED
-        }
-        updateCamera()
-        val chain = swapChain
-        if (chain != null) {
-            if (renderer.beginFrame(chain, frameTimeNanos)) {
-                renderer.render(view)
-                renderer.endFrame()
-            }
-        }
-    }
+    // lateinit var: el callback se referencia a sí mismo al reprogramarse,
+    // y Kotlin no permite usar un val dentro de su propio inicializador.
+    private lateinit var frameCallback: Choreographer.FrameCallback
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -100,6 +89,21 @@ class MainActivity : AppCompatActivity(), SurfaceHolder.Callback {
         loginButton.isEnabled = false
 
         initFilament()
+
+        frameCallback = Choreographer.FrameCallback { frameTimeNanos ->
+            choreographer.postFrameCallback(frameCallback)
+            if (!dragging) {
+                azimuth += AUTO_ROTATE_SPEED
+            }
+            updateCamera()
+            val chain = swapChain
+            if (chain != null) {
+                if (renderer.beginFrame(chain, frameTimeNanos)) {
+                    renderer.render(view)
+                    renderer.endFrame()
+                }
+            }
+        }
 
         surfaceView.holder.addCallback(this)
         surfaceView.setOnTouchListener { _, event ->
