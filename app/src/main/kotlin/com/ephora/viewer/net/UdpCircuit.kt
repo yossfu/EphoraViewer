@@ -337,8 +337,9 @@ class UdpCircuit(
                     val p = mi?.position
                     setState(ConnectionState.Connected(an, rn, if (p != null) Triple(p[0], p[1], p[2]) else Triple(0f, 0f, 0f)))
                 } else {
-                    AppLog.add("CAPS", "Capabilities: falló (3 intentos o 60 s desde el login)")
-                    setState(ConnectionState.Failed("No se pudieron pedir capabilities (3 intentos o 60 s)."))
+                    val detail = CapsClient.lastError ?: "3 intentos o 60 s"
+                    AppLog.add("CAPS", "Capabilities: falló ($detail)")
+                    setState(ConnectionState.Failed("No se pudieron pedir capabilities ($detail)."))
                 }
             }
         }).start()

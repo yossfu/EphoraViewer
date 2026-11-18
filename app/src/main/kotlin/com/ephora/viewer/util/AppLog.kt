@@ -13,7 +13,7 @@ import java.util.Locale
 // y mensajes de error. Quien instrumenta el código debe cumplirla.
 object AppLog {
 
-    private const val MAX_LINES = 1000
+    private const val MAX_LINES = 5000
     private val lines = ArrayDeque<String>()
     private val timeFormat = SimpleDateFormat("HH:mm:ss.SSS", Locale.US)
 

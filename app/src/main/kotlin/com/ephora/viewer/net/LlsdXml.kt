@@ -33,14 +33,31 @@ object LlsdXml {
                     if (p.name != "key") throw IllegalArgumentException("se esperaba <key>")
                     val k = p.nextText()
                     p.nextTag() // valor <string> o <url>
-                    if (p.name != "string" && p.name != "url") throw IllegalArgumentException("valor no string para $k")
-                    val v = p.nextText()
-                    m[k] = v
+                    if (p.name != "string" && p.name != "url") {
+                        // Valor no textual (p. ej. <integer>): no es una URL,
+                        // se ignora en vez de romper todo el mapa.
+                        skipElement(p)
+                    } else {
+                        val v = p.nextText()
+                        m[k] = v
+                    }
                 }
                 XmlPullParser.END_TAG -> {
                     if (p.name == "map") return m
                 }
                 else -> {}
+            }
+        }
+    }
+
+    // Consume el elemento actual (ya estamos en su START_TAG) hasta su END_TAG.
+    private fun skipElement(p: XmlPullParser) {
+        var depth = 1
+        while (depth > 0) {
+            when (p.next()) {
+                XmlPullParser.START_TAG -> depth++
+                XmlPullParser.END_TAG -> depth--
+                XmlPullParser.END_DOCUMENT -> return
             }
         }
     }
