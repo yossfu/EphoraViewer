@@ -45,8 +45,8 @@ jobs:
           MATC=$(find /tmp/filament-tools -name matc -type f | head -n 1)
           test -n "$MATC" || { echo "matc no encontrado en el tarball"; exit 1; }
           chmod +x "$MATC"
-          "$MATC" -o app/src/main/assets/filament/terrain_prim_lit.filamat app/src/main/materials/terrain_prim_lit.mat
-          "$MATC" -o app/src/main/assets/filament/water_unlit.filamat app/src/main/materials/water_unlit.mat
+          "$MATC" -p mobile -a opengl -o app/src/main/assets/filament/terrain_prim_lit.filamat app/src/main/materials/terrain_prim_lit.mat
+          "$MATC" -p mobile -a opengl -o app/src/main/assets/filament/water_unlit.filamat app/src/main/materials/water_unlit.mat
           ls -l app/src/main/assets/filament/
 
       - name: Build Debug APK
