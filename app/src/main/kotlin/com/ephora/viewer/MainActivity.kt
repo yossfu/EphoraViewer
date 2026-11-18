@@ -12,6 +12,7 @@ import androidx.appcompat.app.AppCompatActivity
 import com.google.android.filament.Camera
 import com.google.android.filament.Engine
 import com.google.android.filament.EntityManager
+import com.google.android.filament.Filament
 import com.google.android.filament.LightManager
 import com.google.android.filament.Renderer
 import com.google.android.filament.Scene
@@ -87,6 +88,12 @@ class MainActivity : AppCompatActivity(), SurfaceHolder.Callback {
         // No hay ningún intento de autenticación en M0.
         val loginButton: Button = findViewById(R.id.button_login)
         loginButton.isEnabled = false
+
+        // Obligatorio según la documentación oficial de Filament:
+        // "You must always first initialize Filament by calling Filament.init()".
+        // Sin esta llamada, la librería nativa no se carga y Engine.create()
+        // falla con UnsatisfiedLinkError (crash real reportado por Rerir, M0).
+        Filament.init()
 
         initFilament()
 
