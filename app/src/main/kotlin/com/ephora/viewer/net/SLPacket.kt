@@ -7,8 +7,12 @@ import kotlin.math.sqrt
 
 // Regla de oro: cabecera big-endian, cuerpo little-endian.
 // Cabecera 6 bytes: flags, seq BE 4 bytes (1..0xFFFFFF, wrap a 1), extra count 1 byte.
-// SIN VERIFICAR D1: se asume nº mensaje FUERA de zerocode (cabecera+nº sin comprimir,
-// cuerpo sí). Validar con primer RegionHandshake real: SimName legible + WaterHeight sensata.
+// D1 CONFIRMADO con el primer RegionHandshake real (2026-11-18, log de Rerir):
+// el número de mensaje va DENTRO de la región zerocodificada. El RegionHandshake
+// (Low 148 = 0xFFFF0094) llegó como FF FF 00 01 94: el 0x00 del número se escapa
+// como 00 01. Por eso número + cuerpo se codifican/decodifican juntos. Antes de
+// este arreglo, RegionHandshake se leía como Low(1) y se descartaba en silencio,
+// y el handshake se quedaba en "Esperando datos de la región…".
 object SlFlags {
     const val ZEROCODED = 0x80
     const val RELIABLE = 0x40
@@ -182,10 +186,13 @@ object SLPacket {
     }
 
     private fun decodeMsgNum(b: ByteArray, off: Int): Triple<Frequency, Int, Int> {
+        require(off < b.size) { "sin número de mensaje" }
         val b0 = b[off].toInt() and 0xFF
         if (b0 != 0xFF) return Triple(Frequency.HIGH, b0, 1)
+        require(off + 1 < b.size) { "número de mensaje truncado" }
         val b1 = b[off + 1].toInt() and 0xFF
         if (b1 != 0xFF) return Triple(Frequency.MEDIUM, (b0 shl 8) or b1, 2)
+        require(off + 3 < b.size) { "número de mensaje truncado" }
         val b2 = b[off + 2].toInt() and 0xFF
         val b3 = b[off + 3].toInt() and 0xFF
         val w = (b0 shl 24) or (b1 shl 16) or (b2 shl 8) or b3
@@ -196,20 +203,22 @@ object SLPacket {
 
     fun buildDatagram(seq: Int, freq: Frequency, msgId: Int, body: ByteArray, reliable: Boolean, zerocoded: Boolean, resent: Boolean = false): ByteArray {
         require(seq in 1..SEQ_MAX) { "seq fuera de rango" }
+        val mn = encodeMsgNum(freq, msgId)
+        // D1: número + cuerpo se codifican juntos cuando hay zerocode.
         var useZc = zerocoded
-        var encBody = if (useZc) zerocodeEncode(body) else body
+        var payload = mn + body
+        if (useZc) payload = zerocodeEncode(payload)
         var flags = 0
         if (useZc) flags = flags or SlFlags.ZEROCODED
         if (reliable) flags = flags or SlFlags.RELIABLE
         if (resent) flags = flags or SlFlags.RESENT
         // Sin ACKs añadidos en envío M2 (solo PacketAck). Recepción sí los soporta.
-        val mn = encodeMsgNum(freq, msgId)
-        var total = 6 + mn.size + encBody.size
+        var total = 6 + payload.size
         if (useZc && total > UDP_MTU) {
             useZc = false
-            encBody = body
+            payload = mn + body
             flags = flags and SlFlags.ZEROCODED.inv()
-            total = 6 + mn.size + encBody.size
+            total = 6 + payload.size
         }
         if (total > UDP_MTU) throw IllegalArgumentException("datagrama >MTU $total")
         val o = ByteArrayOutputStream(total)
@@ -219,8 +228,7 @@ object SLPacket {
         o.write((seq shr 8) and 0xFF)
         o.write(seq and 0xFF)
         o.write(0)
-        o.write(mn)
-        o.write(encBody)
+        o.write(payload)
         return o.toByteArray()
     }
 
@@ -230,10 +238,8 @@ object SLPacket {
         val seq = ((d[1].toLong() and 0xFF) shl 24) or ((d[2].toLong() and 0xFF) shl 16) or ((d[3].toLong() and 0xFF) shl 8) or (d[4].toLong() and 0xFF)
         val seqI = seq.toInt()
         val extra = d[5].toInt() and 0xFF
-        var off = 6 + extra
+        val off = 6 + extra
         require(off < len) { "extra header inválido" }
-        val (freq, msgId, mnLen) = decodeMsgNum(d, off)
-        off += mnLen
         var bodyEnd = len
         val acks = mutableListOf<Int>()
         if (flags and SlFlags.ACK != 0) { // últimos: N*4 BE + 1 byte count.
@@ -247,8 +253,13 @@ object SLPacket {
             }
             bodyEnd = len - n * 4 - 1
         }
-        val enc = d.copyOfRange(off, bodyEnd)
-        val body = if (flags and SlFlags.ZEROCODED != 0) zerocodeDecode(enc) else enc
+        // D1: el número de mensaje va DENTRO de la región zerocodificada:
+        // se decodifica número + cuerpo juntos y luego se lee el número.
+        // Los ACKs añadidos quedan fuera (ya se separaron arriba).
+        val region = d.copyOfRange(off, bodyEnd)
+        val decoded = if (flags and SlFlags.ZEROCODED != 0) zerocodeDecode(region) else region
+        val (freq, msgId, mnLen) = decodeMsgNum(decoded, 0)
+        val body = decoded.copyOfRange(mnLen, decoded.size)
         return DecodedPacket(seqI, flags, freq, msgId, body, acks)
     }
 }

@@ -190,12 +190,18 @@
 - Decodificación: al leer `0x00`, el byte siguiente N significa "N bytes
   cero". Todo lo demás se copia tal cual.
 - La wiki anota en la contabilidad de longitud: "4 bytes para el número de
-  mensaje (+1 si el paquete es zerocoded)". El significado exacto de ese
-  "+1" (y si el número de mensaje está dentro o fuera de la región
-  zerocodificada) **no se pudo confirmar en esta sesión** (ver D1). La
-  implementación debe validarlo con el primer paquete real (`RegionHandshake`
-  es zerocoded): si el `SimName` se lee como texto legible y `WaterHeight`
-  es un float sensato, la decodificación es correcta.
+  mensaje (+1 si el paquete es zerocoded)". **D1 RESUELTO con el primer
+  `RegionHandshake` real (2026-11-18, log del móvil de Rerir): el número de
+  mensaje va DENTRO de la región zerocodificada.** La prueba: el
+  `RegionHandshake` (Low 148 = `0xFFFF0094`) llegó como `FF FF 00 01 94` —
+  el `0x00` del número se escapa como `00 01`, así que el número ocupa
+  5 bytes y ese "+1" de la wiki es exactamente ese byte extra. Antes del
+  arreglo, Ephora leía el número fuera de la región zerocodificada y el
+  `RegionHandshake` se interpretaba como `Low(1)` y se descartaba en
+  silencio: el handshake se quedaba en "Esperando datos de la región…"
+  aunque el simulador ya estaba enviando datos. La implementación correcta
+  (ver `net/SLPacket.kt`): número + cuerpo se zerocodifican/decodifican
+  juntos, en ambos sentidos; los ACKs añadidos quedan fuera.
 - Qué mensajes de M2 son zerocoded (plantilla): `RegionHandshake`,
   `RegionHandshakeReply`, `AgentThrottle`, `AgentUpdate`, `LogoutReply`.
   Qué mensajes NO lo son: `UseCircuitCode`, `CompleteAgentMovement`,
@@ -959,7 +965,7 @@ aquí debe copiarse al código como si estuviera confirmado.
 
 | Nº | Punto | Estado |
 |---|---|---|
-| D1 | El "+1 si el paquete es zerocoded" de la wiki `Packet Layout`, y si el número de mensaje está dentro o fuera de la región zerocodificada | Sin verificar. Validar con el primer `RegionHandshake` real: si `SimName` se lee como texto y `WaterHeight` es un float sensato, la decodificación es correcta |
+| D1 | El "+1 si el paquete es zerocoded" de la wiki `Packet Layout`, y si el número de mensaje está dentro o fuera de la región zerocodificada | **RESUELTO 2026-11-18 con el primer `RegionHandshake` real (log del móvil): el número va DENTRO de la región zerocodificada.** `0xFFFF0094` llegó como `FF FF 00 01 94`. Número + cuerpo se codifican/decodifican juntos; ACKs añadidos fuera. Ver sección 2.5 y `net/SLPacket.kt` |
 | D2 | Orden de bytes de `LLUUID` (16 bytes) e `IPPORT` (2 bytes) en el cuerpo | Sin verificar en esta sesión. Se asume orden de red (big-endian) para ambos, como en libomv, pero no se abrió el código que lo confirma |
 | D3 | Empaquetado de `LLQuaternion`: 12 bytes (X, Y, Z) con W reconstruida | Sin verificar en esta sesión. Es el empaquetado clásico del protocolo SL, pero no se confirmó contra la plantilla ni contra código |
 | D4 | Si `RegionHandshakeReply` se envía fiable | Sin verificar. Ni la plantilla ni el código de libomv consultado lo dejan claro; Lumiya no marca `isReliable`. M2 lo envía fiable por prudencia |
