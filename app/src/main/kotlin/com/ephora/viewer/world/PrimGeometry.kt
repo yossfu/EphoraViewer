@@ -30,14 +30,18 @@ class PrimGeometry(private val engine: Engine) {
 
     private fun interleave(pos: FloatArray, nor: FloatArray, col: FloatArray): ByteBuffer {
         val n = pos.size / 3
-        val bb = ByteBuffer.allocateDirect(n * 40).order(ByteOrder.LITTLE_ENDIAN)
+        val bb = ByteBuffer.allocateDirect(n * 44).order(ByteOrder.LITTLE_ENDIAN)
         for (i in 0 until n) {
             bb.putFloat(pos[i * 3])
             bb.putFloat(pos[i * 3 + 1])
             bb.putFloat(pos[i * 3 + 2])
-            bb.putFloat(nor[i * 3])
-            bb.putFloat(nor[i * 3 + 1])
-            bb.putFloat(nor[i * 3 + 2])
+            // Sin atributo NORMAL en Filament: la normal va como
+            // cuaternión del marco tangente (TANGENTS, float4).
+            val q = SlToFilament.tangentQuaternion(nor[i * 3], nor[i * 3 + 1], nor[i * 3 + 2])
+            bb.putFloat(q[0])
+            bb.putFloat(q[1])
+            bb.putFloat(q[2])
+            bb.putFloat(q[3])
             bb.putFloat(col[i * 4])
             bb.putFloat(col[i * 4 + 1])
             bb.putFloat(col[i * 4 + 2])
@@ -49,9 +53,9 @@ class PrimGeometry(private val engine: Engine) {
 
     private fun toMesh(pos: FloatArray, nor: FloatArray, col: FloatArray, idx: IntArray): Mesh {
         val vb = VertexBuffer.Builder().vertexCount(pos.size / 3).bufferCount(1)
-            .attribute(VertexBuffer.VertexAttribute.POSITION, 0, VertexBuffer.AttributeType.FLOAT3, 0, 40)
-            .attribute(VertexBuffer.VertexAttribute.NORMAL, 0, VertexBuffer.AttributeType.FLOAT3, 12, 40)
-            .attribute(VertexBuffer.VertexAttribute.COLOR, 0, VertexBuffer.AttributeType.FLOAT4, 24, 40)
+            .attribute(VertexBuffer.VertexAttribute.POSITION, 0, VertexBuffer.AttributeType.FLOAT3, 0, 44)
+            .attribute(VertexBuffer.VertexAttribute.TANGENTS, 0, VertexBuffer.AttributeType.FLOAT4, 12, 44)
+            .attribute(VertexBuffer.VertexAttribute.COLOR, 0, VertexBuffer.AttributeType.FLOAT4, 28, 44)
             .build(engine)
         vb.setBufferAt(engine, 0, interleave(pos, nor, col))
         val ib = IndexBuffer.Builder().indexCount(idx.size).bufferType(IndexBuffer.Builder.IndexType.UINT).build(engine)

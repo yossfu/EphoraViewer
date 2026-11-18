@@ -73,7 +73,7 @@ class TerrainMesh(
         lastBuild = System.currentTimeMillis()
         val n = 257
         val vCount = n * n
-        val stride = 10 * 4
+        val stride = 11 * 4
         val bb = ByteBuffer.allocateDirect(vCount * stride).order(ByteOrder.LITTLE_ENDIAN)
         var minY = Float.MAX_VALUE
         var maxY = -Float.MAX_VALUE
@@ -109,9 +109,13 @@ class TerrainMesh(
             bb.putFloat(fx)
             bb.putFloat(fy)
             bb.putFloat(fz)
-            bb.putFloat(fnx)
-            bb.putFloat(fny)
-            bb.putFloat(fnz)
+            // Sin atributo NORMAL en Filament: la normal va como
+            // cuaternión del marco tangente (TANGENTS, float4).
+            val q = SlToFilament.tangentQuaternion(fnx, fny, fnz)
+            bb.putFloat(q[0])
+            bb.putFloat(q[1])
+            bb.putFloat(q[2])
+            bb.putFloat(q[3])
             bb.putFloat(c[0])
             bb.putFloat(c[1])
             bb.putFloat(c[2])
@@ -120,8 +124,8 @@ class TerrainMesh(
         bb.flip()
         val vb = VertexBuffer.Builder().vertexCount(vCount).bufferCount(1)
             .attribute(VertexBuffer.VertexAttribute.POSITION, 0, VertexBuffer.AttributeType.FLOAT3, 0, stride)
-            .attribute(VertexBuffer.VertexAttribute.NORMAL, 0, VertexBuffer.AttributeType.FLOAT3, 12, stride)
-            .attribute(VertexBuffer.VertexAttribute.COLOR, 0, VertexBuffer.AttributeType.FLOAT4, 24, stride)
+            .attribute(VertexBuffer.VertexAttribute.TANGENTS, 0, VertexBuffer.AttributeType.FLOAT4, 12, stride)
+            .attribute(VertexBuffer.VertexAttribute.COLOR, 0, VertexBuffer.AttributeType.FLOAT4, 28, stride)
             .build(engine)
         vb.setBufferAt(engine, 0, bb)
         val idxCount = 256 * 256 * 6

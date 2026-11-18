@@ -1,6 +1,7 @@
 package com.ephora.viewer.world
 
 import android.content.res.AssetManager
+import com.google.android.filament.Colors
 import com.google.android.filament.Engine
 import com.google.android.filament.Material
 import com.google.android.filament.MaterialInstance
@@ -27,7 +28,7 @@ object Materials {
 
     fun tint(engine: Engine, base: Material, r: Float, g: Float, b: Float): MaterialInstance {
         val i = base.createInstance()
-        i.setParameter("baseColor", MaterialInstance.RgbType.SRGB, r, g, b)
+        i.setParameter("baseColor", Colors.RgbType.SRGB, r, g, b)
         return i
     }
 
@@ -47,7 +48,7 @@ object Materials {
 
     fun waterInstance(water: Material): MaterialInstance {
         val i = water.createInstance()
-        i.setParameter("baseColor", MaterialInstance.RgbType.SRGB, 0.3f, 0.6f, 0.9f)
+        i.setParameter("baseColor", Colors.RgbType.SRGB, 0.3f, 0.6f, 0.9f)
         i.setParameter("opacity", 0.7f)
         return i
     }

@@ -57,6 +57,23 @@ object SlToFilament {
         return m
     }
 
+    // Filament NO tiene atributo NORMAL: la normal va empaquetada en el
+    // atributo TANGENTS como cuaternión float4 del marco tangente
+    // (tangente = q·(1,0,0), binormal = q·(0,1,0), normal = q·(0,0,1)).
+    // Este helper calcula el cuaternión de arco más corto que lleva +Z
+    // a la normal unitaria (nx, ny, nz): q = (-ny, nx, 0, 1+nz).
+    // Verificado contra el AAR filament-android 1.56.0: VertexAttribute
+    // solo tiene POSITION, TANGENTS, COLOR, UV0, UV1, BONE_INDICES,
+    // BONE_WEIGHTS, UNUSED y CUSTOM0-7 (no existe NORMAL).
+    fun tangentQuaternion(nx: Float, ny: Float, nz: Float): FloatArray {
+        if (nz < -0.9999f) return floatArrayOf(1f, 0f, 0f, 0f) // n ≈ (0,0,-1): giro 180° sobre X
+        val x = -ny
+        val y = nx
+        val w = 1f + nz
+        val l = Math.sqrt((x * x + y * y + w * w).toDouble()).toFloat().let { if (it == 0f) 1f else it }
+        return floatArrayOf(x / l, y / l, 0f, w / l)
+    }
+
     // RegionHandle solo lectura: bits altos = X global, bajos = Y global.
     fun regionHandleToGlobal(handle: Long) = Pair((handle shr 32) and 0xFFFFFFFFL, handle and 0xFFFFFFFFL)
 }
