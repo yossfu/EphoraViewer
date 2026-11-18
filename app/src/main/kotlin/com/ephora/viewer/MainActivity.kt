@@ -87,6 +87,13 @@ class MainActivity : AppCompatActivity(), SurfaceHolder.Callback {
         private const val TAG = "EphoraViewer"
         private const val CAMERA_RADIUS = 3.0
         private const val AUTO_ROTATE_SPEED = 0.002
+        // DIAGNÓSTICO TEMPORAL (regresión run #15, 2026-11-18): carga de
+        // materiales desactivada para confirmar si el cierre instantáneo
+        // viene de Material.Builder().build() en onCreate. Con esto la
+        // app arranca como en M2 (sin mundo 3D). QUITAR (poner en false)
+        // en cuanto se confirme o descarte; NUNCA subir un build final
+        // con este flag en true.
+        private const val DISABLE_WORLD_DIAGNOSTIC = true
     }
 
     private lateinit var surfaceView: SurfaceView
@@ -342,6 +349,11 @@ class MainActivity : AppCompatActivity(), SurfaceHolder.Callback {
     // Los .filamat los compila el workflow de Actions con matc 1.56.0;
     // si no están, devuelve null y la app sigue como en M2.
     private fun createWorldScene() {
+        if (DISABLE_WORLD_DIAGNOSTIC) {
+            AppLog.add("SCENE", "Diagnóstico: carga de materiales desactivada (regresión run #15)")
+            sceneStatusText.text = getString(R.string.scene_status_error)
+            return
+        }
         val mats = Materials.load(engine, assets)
         if (mats == null) {
             AppLog.add("SCENE", "Materiales .filamat no encontrados (sin mundo 3D)")
