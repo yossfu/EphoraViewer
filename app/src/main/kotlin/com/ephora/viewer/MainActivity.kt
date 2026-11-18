@@ -72,7 +72,7 @@ class MainActivity : AppCompatActivity(), SurfaceHolder.Callback {
     private var dragging = false
 
     private val choreographer = Choreographer.getInstance()
-    private val frameCallback = Choreographer.FrameCallback { frameTimeNanos ->
+    private val frameCallback: Choreographer.FrameCallback = Choreographer.FrameCallback { frameTimeNanos ->
         choreographer.postFrameCallback(frameCallback)
         if (!dragging) {
             azimuth += AUTO_ROTATE_SPEED
@@ -167,6 +167,11 @@ class MainActivity : AppCompatActivity(), SurfaceHolder.Callback {
         val loader = AssetLoader(engine, UbershaderProvider(engine), EntityManager.get())
         assetLoader = loader
         val asset = loader.createAsset(buffer)
+        if (asset == null) {
+            Log.e(TAG, "createAsset devolvió null para cube.glb")
+            sceneStatusText.text = getString(R.string.scene_status_error)
+            return
+        }
         cubeAsset = asset
         ResourceLoader(engine).loadResources(asset)
         asset.releaseSourceData()
