@@ -22,6 +22,7 @@ import com.google.android.filament.View
 import com.google.android.filament.Viewport
 import com.google.android.filament.gltfio.AssetLoader
 import com.google.android.filament.gltfio.FilamentAsset
+import com.google.android.filament.gltfio.Gltfio
 import com.google.android.filament.gltfio.ResourceLoader
 import com.google.android.filament.gltfio.UbershaderProvider
 import java.nio.ByteBuffer
@@ -94,6 +95,16 @@ class MainActivity : AppCompatActivity(), SurfaceHolder.Callback {
         // Sin esta llamada, la librería nativa no se carga y Engine.create()
         // falla con UnsatisfiedLinkError (crash real reportado por Rerir, M0).
         Filament.init()
+
+        // Igual de obligatorio para gltfio: Filament.init() solo carga
+        // libfilament-jni.so. La librería nativa de gltfio (libgltfio-jni.so)
+        // se carga con Gltfio.init(); sin ella, UbershaderProvider falla con
+        // UnsatisfiedLinkError (segundo crash real, run #5). Diagnóstico de la
+        // IA de Perchance, verificado por Agni contra el AAR gltfio-android
+        // 1.56.0 de Maven Central (Gltfio.init() carga "gltfio-jni", y el .so
+        // viene para los 4 ABI). Debe ir después de Filament.init() y antes
+        // de cualquier uso de AssetLoader/UbershaderProvider/ResourceLoader.
+        Gltfio.init()
 
         initFilament()
 
