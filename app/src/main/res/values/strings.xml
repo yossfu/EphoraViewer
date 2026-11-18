@@ -10,8 +10,12 @@
     <string name="login_button">Iniciar sesión</string>
     <string name="login_connecting">Conectando con Second Life…</string>
     <string name="login_empty_fields">Escribe nombre, apellido y contraseña.</string>
-    <string name="scene_status_ready">Escena de prueba lista: cubo PBR con luz direccional (Filament 1.56.0). Arrastra para girar la cámara.</string>
-    <string name="scene_status_error">No se pudo cargar la escena de prueba (cubo). Filament está activo, pero el modelo no se cargó.</string>
+    <string name="scene_status_ready">Escena 3D lista: terreno, prims y agua (Filament 1.56.0). Arrastra para girar la cámara.</string>
+    <string name="scene_status_error">No se pudo crear la escena 3D (materiales no cargados). Filament está activo, pero no hay mundo.</string>
+    <string name="world_waiting_login">Inicia sesión para entrar al mundo.</string>
+    <string name="loading_terrain">Cargando terreno…</string>
+    <string name="loading_objects">Cargando objetos…</string>
+    <string name="status_objects_patches">%1$d objetos, %2$d parches de terreno</string>
     <string name="log_title">Registro</string>
     <string name="log_show">Log</string>
     <string name="log_copy">Copiar</string>

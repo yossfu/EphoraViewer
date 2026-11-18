@@ -5,6 +5,9 @@ import android.os.Looper
 import android.util.Log
 import com.ephora.viewer.auth.LoginSession
 import com.ephora.viewer.util.AppLog
+import com.ephora.viewer.world.LayerData
+import com.ephora.viewer.world.ObjectUpdate
+import com.ephora.viewer.world.WorldScene
 import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.InetAddress
@@ -32,6 +35,17 @@ class UdpCircuit(
     var movementInfo: AgentMovementCompleteData? = null
         private set
     val capsUrls = mutableMapOf<String, String>()
+
+    // Escena 3D (hito M3), inyectada por MainActivity. Las ramas de
+    // handlePacket solo le pasan datos parseados; NUNCA se toca Filament
+    // desde el hilo UDP (la escena sincroniza en el hilo principal).
+    var worldSceneRef: WorldScene? = null
+
+    // Vectores de cámara reales (hito M3): MainActivity los calcula cada
+    // frame desde la órbita y los empuja aquí para AgentUpdate.
+    fun updateCamera(v: CameraVectors) {
+        updateSender?.setCamera(v)
+    }
 
     private var socket: DatagramSocket? = null
     private var running = false
@@ -241,6 +255,8 @@ class UdpCircuit(
                     val info = RegionHandshake.parseHandshake(d.body)
                     regionInfo = info
                     AppLog.add("UDP", "RegionHandshake: '${info.simName}' agua=${info.waterHeight} acceso=${info.simAccess}")
+                    // Hito M3: la altura del agua va a la escena.
+                    mainHandler.post { worldSceneRef?.setWaterHeight(info.waterHeight) }
                     // Validación D1: SimName legible + WaterHeight sensata => zerocode OK.
                     val reply = RegionHandshake.buildReply(session.agentId, session.sessionId, 4L) // D6: 4 SelfAppearanceSupport (Lumiya 0). Si falla, probar 0.
                     sendReliable(Frequency.LOW, MessageTypes.REGION_HANDSHAKE_REPLY_LOW, reply, true) // D4: fiable por prudencia, SIN VERIFICAR.
@@ -257,6 +273,8 @@ class UdpCircuit(
                     val m = RegionHandshake.parseMovementComplete(d.body)
                     movementInfo = m
                     AppLog.add("UDP", "MovementComplete pos=(${m.position[0]}, ${m.position[1]}, ${m.position[2]}) canal='${m.channelVersion}'")
+                    // Hito M3: la posición del avatar va a la escena.
+                    mainHandler.post { worldSceneRef?.setAvatarSl(m.position) }
                     gotMovement = true
                     afterHandshakeProgress()
                 } catch (e: Exception) {
@@ -285,6 +303,76 @@ class UdpCircuit(
             d.frequency == Frequency.LOW && d.messageId == MessageTypes.LOGOUT_REPLY_LOW -> {
                 setState(ConnectionState.Disconnected("Sesión cerrada."))
                 stop(false)
+            }
+            // Hito M3: escena del mundo. Ninguna rama toca Filament: los
+            // parsers son Kotlin puro y la escena sincroniza en el hilo
+            // principal (WorldScene.requestSync).
+            d.frequency == Frequency.HIGH && d.messageId == MessageTypes.LAYER_DATA_HIGH -> {
+                try {
+                    val n = LayerData.parseMessage(d.body)
+                    if (n > 0) mainHandler.post { worldSceneRef?.onTerrain(LayerData.heights, LayerData.patchCount) }
+                } catch (e: Exception) {
+                    AppLog.add("TERRAIN", "LayerData fail: ${e.message}")
+                }
+            }
+            d.frequency == Frequency.HIGH && d.messageId == MessageTypes.OBJECT_UPDATE_HIGH -> {
+                try {
+                    val l = ObjectUpdate.parseFull(d.body)
+                    if (l.isNotEmpty()) mainHandler.post { worldSceneRef?.onPrims(l) }
+                } catch (e: Exception) {
+                    AppLog.add("OBJECT", "ObjectUpdate fail: ${e.message}")
+                }
+            }
+            d.frequency == Frequency.HIGH && d.messageId == MessageTypes.OBJECT_UPDATE_COMPRESSED_HIGH -> {
+                try {
+                    val l = ObjectUpdate.parseCompressed(d.body)
+                    if (l.isNotEmpty()) mainHandler.post { worldSceneRef?.onPrims(l) }
+                } catch (e: Exception) {
+                    AppLog.add("OBJECT", "ObjectUpdateCompressed fail: ${e.message}")
+                }
+            }
+            d.frequency == Frequency.HIGH && d.messageId == MessageTypes.OBJECT_UPDATE_CACHED_HIGH -> {
+                try {
+                    val need = ObjectUpdate.parseCached(d.body)
+                    if (need.isNotEmpty()) {
+                        // RequestMultipleObjects Medium 3, zerocoded, no fiable.
+                        val w = PacketWriter()
+                        w.putU8(need.size)
+                        for (t in need) w.putU32(t.first)
+                        sendUnreliable(Frequency.MEDIUM, MessageTypes.REQUEST_MULTIPLE_OBJECTS_MEDIUM, w.toByteArray(), true)
+                    }
+                } catch (e: Exception) {
+                    AppLog.add("OBJECT", "ObjectUpdateCached fail: ${e.message}")
+                }
+            }
+            d.frequency == Frequency.HIGH && d.messageId == MessageTypes.IMPROVED_TERSE_OBJECT_UPDATE_HIGH -> {
+                try {
+                    val l = ObjectUpdate.parseTerse(d.body)
+                    if (l.isNotEmpty()) mainHandler.post { worldSceneRef?.onTerse(l) }
+                } catch (e: Exception) {
+                    AppLog.add("OBJECT", "Terse fail: ${e.message}")
+                }
+            }
+            d.frequency == Frequency.HIGH && d.messageId == MessageTypes.KILL_OBJECT_HIGH -> {
+                try {
+                    val ids = ObjectUpdate.parseKill(d.body)
+                    if (ids.isNotEmpty()) mainHandler.post { worldSceneRef?.onKill(ids) }
+                } catch (e: Exception) {
+                    AppLog.add("OBJECT", "KillObject fail: ${e.message}")
+                }
+            }
+            d.frequency == Frequency.MEDIUM && d.messageId == MessageTypes.COARSE_LOCATION_UPDATE_MEDIUM -> {
+                // Posiciones gruesas de avatares: M4. Solo se registra el tamaño.
+                AppLog.add("UDP", "CoarseLocation len=${d.body.size}")
+            }
+            d.frequency == Frequency.LOW && d.messageId == MessageTypes.SIM_STATS_LOW -> {
+                // Estadísticas del simulador (ObjectCapacity, etc.): M3
+                // solo registra; la lectura de ObjectCapacity queda para
+                // cuando se verifique el layout exacto del bloque.
+                AppLog.add("SIM", "SimStats len=${d.body.size}")
+            }
+            d.frequency == Frequency.LOW && d.messageId == MessageTypes.PARCEL_OVERLAY_LOW -> {
+                AppLog.add("PARCEL", "overlay len=${d.body.size}")
             }
             else -> {}
         }

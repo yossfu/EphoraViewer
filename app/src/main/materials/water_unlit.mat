@@ -1,0 +1,30 @@
+material {
+    name : water_unlit,
+    shadingModel : unlit,
+    blending : transparent,
+    transparencyMode : default,
+    depthWrite : false,
+    parameters : [
+        {
+            type : float3,
+            name : baseColor
+        },
+        {
+            type : float,
+            name : opacity
+        }
+    ]
+}
+
+vertex {
+    void materialVertex(inout MaterialVertexInputs material) {
+    }
+}
+
+fragment {
+    void material(inout MaterialInputs material) {
+        prepareMaterial(material);
+        material.baseColor.rgb = materialParams.baseColor;
+        material.baseColor.a = materialParams.opacity;
+    }
+}

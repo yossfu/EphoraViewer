@@ -26,10 +26,15 @@ import com.ephora.viewer.auth.LoginCredentials
 import com.ephora.viewer.auth.LoginResult
 import com.ephora.viewer.auth.LoginSession
 import com.ephora.viewer.auth.SLLogin
+import com.ephora.viewer.net.CameraVectors
 import com.ephora.viewer.net.ConnectionState
 import com.ephora.viewer.net.UdpCircuit
 import com.ephora.viewer.net.uiText
 import com.ephora.viewer.util.AppLog
+import com.ephora.viewer.world.Materials
+import com.ephora.viewer.world.PrimGeometry
+import com.ephora.viewer.world.TerrainMesh
+import com.ephora.viewer.world.WorldScene
 import com.google.android.filament.Camera
 import com.google.android.filament.Engine
 import com.google.android.filament.EntityManager
@@ -41,23 +46,19 @@ import com.google.android.filament.Skybox
 import com.google.android.filament.SwapChain
 import com.google.android.filament.View
 import com.google.android.filament.Viewport
-import com.google.android.filament.gltfio.AssetLoader
-import com.google.android.filament.gltfio.FilamentAsset
 import com.google.android.filament.gltfio.Gltfio
-import com.google.android.filament.gltfio.ResourceLoader
-import com.google.android.filament.gltfio.UbershaderProvider
-import java.nio.ByteBuffer
 import kotlin.math.cos
 import kotlin.math.sin
+import kotlin.math.sqrt
 
 /**
- * Hito M0 + M1 + M2 de Ephora Viewer.
+ * Hito M0 + M1 + M2 + M3 de Ephora Viewer.
  *
  * Lo que esta pantalla hace de verdad:
- * - Crea un motor Filament real (Engine, Renderer, Scene, View, Camera),
- *   carga el cubo de prueba `assets/cube.glb` con gltfio, lo ilumina con
- *   una luz direccional y lo renderiza en el SurfaceView. Arrastrar el dedo
- *   gira la cámara alrededor del cubo; si no se toca, gira solo despacio.
+ * - Crea un motor Filament real (Engine, Renderer, Scene, View, Camera)
+ *   con una luz direccional y lo renderiza en el SurfaceView. Arrastrar
+ *   el dedo gira la cámara alrededor del avatar; si no se toca, gira
+ *   solo despacio.
  * - Hito 1: login REAL con Second Life (XML-RPC contra login.cgi, ver
  *   `auth/SLLogin.kt` y `docs/login-protocol-spec.md`). La sesión queda
  *   solo en memoria.
@@ -69,10 +70,16 @@ import kotlin.math.sin
  *   vivo lo que pasa por dentro (login, paquetes UDP, handshake, caps)
  *   con botones para copiarlo, compartirlo y limpiarlo. El registro
  *   nunca contiene session_id, agent_id ni circuit_code.
+ * - Hito 3: escena 3D real del mundo (ver `world/` y
+ *   `docs/world-scene-spec.md`): terreno desde LayerData, prims desde
+ *   ObjectUpdate, agua a la altura del RegionHandshake y cámara en
+ *   tercera persona sobre el avatar. Sin texturas ni avatares todavía
+ *   (M4/M5): los prims son geometría procedural con colores de
+ *   depuración, y los sculpt/mesh se ven como cajas magenta.
  *
- * Lo que NO hace (y no finge hacer): todavía no hay mundo ni avatar;
- * el cubo sigue siendo la escena de prueba hasta M3. Ningún error se
- * disfraza de éxito: lo que dice el servidor es lo que se muestra.
+ * Lo que NO hace (y no finge hacer): todavía no hay avatar ni texturas.
+ * Ningún error se disfraza de éxito: lo que dice el servidor es lo que
+ * se muestra.
  */
 class MainActivity : AppCompatActivity(), SurfaceHolder.Callback {
 
@@ -108,10 +115,15 @@ class MainActivity : AppCompatActivity(), SurfaceHolder.Callback {
     private var lightEntity: Int = 0
 
     private var swapChain: SwapChain? = null
-    private var assetLoader: AssetLoader? = null
-    private var cubeAsset: FilamentAsset? = null
 
-    // Órbita de la cámara alrededor del cubo (origen de la escena).
+    // Escena 3D del mundo (hito M3). Se crea en initFilament, tras
+    // Engine/Scene/View/Camera. Si los materiales compilados (.filamat)
+    // no están, queda en null y la app sigue como en M2 (sin mundo).
+    private var worldScene: WorldScene? = null
+    private var terrainMesh: TerrainMesh? = null
+    private var lastSceneStatus: String? = null
+
+    // Órbita de la cámara alrededor del avatar (objetivo = avatar).
     private var azimuth = 0.6
     private var elevation = 0.35
     private var lastTouchX = 0f
@@ -162,10 +174,11 @@ class MainActivity : AppCompatActivity(), SurfaceHolder.Callback {
                     is LoginResult.Success -> {
                         currentSession = result.session // solo en memoria
                         // Hito 2: sin lobby. Del login a la pantalla de carga
-                        // honesta del circuito UDP; el cubo de Filament sigue
-                        // girando detrás hasta M3.
+                        // honesta del circuito UDP; la escena 3D (hito 3) se
+                        // va llenando con terreno y prims reales.
                         val circuit = UdpCircuit(result.session.simIp, result.session.simPort, result.session, loginTimeMs)
                         udpCircuit = circuit
+                        circuit.worldSceneRef = worldScene
                         circuit.onStateChanged = { st ->
                             loginStatusText.text = st.uiText() + when (st) {
                                 is ConnectionState.Connected -> " (${st.position.first}, ${st.position.second}, ${st.position.third})"
@@ -253,6 +266,8 @@ class MainActivity : AppCompatActivity(), SurfaceHolder.Callback {
                 azimuth += AUTO_ROTATE_SPEED
             }
             updateCamera()
+            worldScene?.syncNow()
+            updateSceneStatus()
             val chain = swapChain
             if (chain != null) {
                 if (renderer.beginFrame(chain, frameTimeNanos)) {
@@ -312,38 +327,95 @@ class MainActivity : AppCompatActivity(), SurfaceHolder.Callback {
         scene.addEntity(lightEntity)
 
         try {
-            loadTestCube()
-            sceneStatusText.text = getString(R.string.scene_status_ready)
+            createWorldScene()
+            sceneStatusText.text = getString(R.string.world_waiting_login)
         } catch (e: Exception) {
-            // Filament sigue activo; solo el modelo de prueba no se cargó.
-            Log.e(TAG, "No se pudo cargar la escena de prueba (cube.glb)", e)
+            // Filament sigue activo; solo la escena 3D no se creó
+            // (normalmente, porque el workflow no generó los .filamat).
+            Log.e(TAG, "No se pudo crear la escena 3D", e)
+            AppLog.add("SCENE", "Escena 3D no creada: ${e.message}")
             sceneStatusText.text = getString(R.string.scene_status_error)
         }
     }
 
-    /** Carga el cubo de prueba (glTF 2.0 binario, material PBR morado Ephora). */
-    private fun loadTestCube() {
-        val bytes = assets.open("cube.glb").use { it.readBytes() }
-        val buffer: ByteBuffer = ByteBuffer.wrap(bytes)
-        val loader = AssetLoader(engine, UbershaderProvider(engine), EntityManager.get())
-        assetLoader = loader
-        val asset = loader.createAsset(buffer)
-        if (asset == null) {
-            Log.e(TAG, "createAsset devolvió null para cube.glb")
+    // Hito 3: crea la escena del mundo (terreno, prims, agua, cámara).
+    // Los .filamat los compila el workflow de Actions con matc 1.56.0;
+    // si no están, devuelve null y la app sigue como en M2.
+    private fun createWorldScene() {
+        val mats = Materials.load(engine, assets)
+        if (mats == null) {
+            AppLog.add("SCENE", "Materiales .filamat no encontrados (sin mundo 3D)")
             sceneStatusText.text = getString(R.string.scene_status_error)
             return
         }
-        cubeAsset = asset
-        ResourceLoader(engine).loadResources(asset)
-        asset.releaseSourceData()
-        scene.addEntities(asset.entities)
+        val (terrainMat, waterMat) = mats
+        val mesh = TerrainMesh(engine, scene, Materials.tint(engine, terrainMat, 1f, 1f, 1f), Materials.waterInstance(waterMat))
+        terrainMesh = mesh
+        val primGeo = PrimGeometry(engine)
+        worldScene = WorldScene(engine, scene, mesh, primGeo, Materials.primInstances(engine, terrainMat))
+        // Altura del agua y posición del avatar, si ya llegaron.
+        udpCircuit?.regionInfo?.let { mesh.setWater(it.waterHeight) }
+        udpCircuit?.movementInfo?.let { worldScene?.setAvatarSl(it.position) }
     }
 
+    // Cámara en tercera persona: orbita alrededor del avatar (hito M3).
+    // El objetivo es el avatar + 1.2 m (pecho); el ojo orbita con la
+    // misma fórmula de M0. Además empuja los vectores reales de la
+    // cámara al circuito UDP (AgentUpdate) cada frame.
     private fun updateCamera() {
-        val eyeX = CAMERA_RADIUS * cos(elevation) * sin(azimuth)
-        val eyeY = CAMERA_RADIUS * sin(elevation)
-        val eyeZ = CAMERA_RADIUS * cos(elevation) * cos(azimuth)
-        camera.lookAt(eyeX, eyeY, eyeZ, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0)
+        val target = worldScene?.avatarTarget() ?: floatArrayOf(0f, 0f, 0f)
+        val eyeX = (target[0] + CAMERA_RADIUS * cos(elevation) * sin(azimuth)).toDouble()
+        val eyeY = (target[1] + CAMERA_RADIUS * sin(elevation)).toDouble()
+        val eyeZ = (target[2] + CAMERA_RADIUS * cos(elevation) * cos(azimuth)).toDouble()
+        camera.lookAt(eyeX, eyeY, eyeZ, target[0].toDouble(), target[1].toDouble(), target[2].toDouble(), 0.0, 1.0, 0.0)
+        pushCameraVectors(eyeX, eyeY, eyeZ, target)
+    }
+
+    // Vectores de cámara en marco SL para AgentUpdate: centro = objetivo,
+    // at = dirección de la mirada, up = (0,0,1), left = up × at.
+    // Conversión Filament -> SL: (x, y, z)_F -> (x, -z, y)_SL.
+    private fun pushCameraVectors(eyeX: Double, eyeY: Double, eyeZ: Double, target: FloatArray) {
+        val ws = worldScene ?: return
+        val cx = target[0]
+        val cy = -target[2]
+        val cz = target[1]
+        var axF = target[0] - eyeX
+        var ayF = target[1] - eyeY
+        var azF = target[2] - eyeZ
+        val len = sqrt(axF * axF + ayF * ayF + azF * azF)
+        if (len < 1e-6) return
+        axF /= len
+        ayF /= len
+        azF /= len
+        val ax = axF.toFloat()
+        val ay = (-azF).toFloat()
+        val az = ayF.toFloat()
+        val ux = 0f
+        val uy = 0f
+        val uz = 1f
+        val lx = uy * az - uz * ay
+        val ly = uz * ax - ux * az
+        val lz = ux * ay - uy * ax
+        val v = CameraVectors(cx, cy, cz, ax, ay, az, lx, ly, lz, ux, uy, uz, 1024f)
+        ws.setExternal(v)
+        udpCircuit?.updateCamera(v)
+    }
+
+    // Texto honesto del estado de la escena (hito M3): antes del login
+    // espera; luego, terreno y objetos según van llegando.
+    private fun updateSceneStatus() {
+        val ws = worldScene
+        val text = when {
+            ws == null -> getString(R.string.scene_status_error)
+            udpCircuit == null -> getString(R.string.world_waiting_login)
+            ws.terrainPatches == 0 -> getString(R.string.loading_terrain)
+            ws.objectCount == 0 -> getString(R.string.loading_objects)
+            else -> getString(R.string.status_objects_patches, ws.objectCount, ws.terrainPatches)
+        }
+        if (text != lastSceneStatus) {
+            lastSceneStatus = text
+            sceneStatusText.text = text
+        }
     }
 
     override fun surfaceCreated(holder: SurfaceHolder) {
@@ -353,7 +425,9 @@ class MainActivity : AppCompatActivity(), SurfaceHolder.Callback {
     override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
         view.viewport = Viewport(0, 0, width, height)
         val aspect = width.toDouble() / height.toDouble()
-        camera.setProjection(45.0, aspect, 0.1, 100.0, Camera.Fov.VERTICAL)
+        // Far 1500: la región mide 256 m de diagonal (~362 m); con far
+        // 100 los prims lejanos se recortarían. Near se mantiene en 0.1.
+        camera.setProjection(45.0, aspect, 0.1, 1500.0, Camera.Fov.VERTICAL)
     }
 
     override fun surfaceDestroyed(holder: SurfaceHolder) {
@@ -380,9 +454,10 @@ class MainActivity : AppCompatActivity(), SurfaceHolder.Callback {
         choreographer.removeFrameCallback(frameCallback)
         swapChain?.let { engine.destroySwapChain(it) }
         swapChain = null
-        cubeAsset?.let { assetLoader?.destroyAsset(it) }
-        cubeAsset = null
-        assetLoader = null
+        // La escena 3D se destruye ANTES que el motor Filament.
+        worldScene?.destroy()
+        worldScene = null
+        terrainMesh = null
         EntityManager.get().destroy(lightEntity)
         EntityManager.get().destroy(cameraEntity)
         engine.destroyView(view)

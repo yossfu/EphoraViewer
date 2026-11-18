@@ -1,0 +1,28 @@
+material {
+    name : terrain_prim_lit,
+    shadingModel : lit,
+    blending : opaque,
+    parameters : [
+        {
+            type : float3,
+            name : baseColor
+        }
+    ],
+    requires : [
+        color
+    ]
+}
+
+vertex {
+    void materialVertex(inout MaterialVertexInputs material) {
+    }
+}
+
+fragment {
+    void material(inout MaterialInputs material) {
+        prepareMaterial(material);
+        material.baseColor.rgb = getColor().rgb * materialParams.baseColor;
+        material.roughness = 0.9;
+        material.metallic = 0.0;
+    }
+}
