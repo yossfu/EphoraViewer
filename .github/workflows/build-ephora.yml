@@ -36,6 +36,19 @@ jobs:
         with:
           gradle-version: '8.5'
 
+      - name: Compile Filament materials (matc 1.56.0)
+        run: |
+          set -euo pipefail
+          mkdir -p app/src/main/assets/filament /tmp/filament-tools
+          curl -sSL -o /tmp/filament-linux.tgz https://github.com/google/filament/releases/download/v1.56.0/filament-v1.56.0-linux.tgz
+          tar xzf /tmp/filament-linux.tgz -C /tmp/filament-tools
+          MATC=$(find /tmp/filament-tools -name matc -type f | head -n 1)
+          test -n "$MATC" || { echo "matc no encontrado en el tarball"; exit 1; }
+          chmod +x "$MATC"
+          "$MATC" -o app/src/main/assets/filament/terrain_prim_lit.filamat app/src/main/materials/terrain_prim_lit.mat
+          "$MATC" -o app/src/main/assets/filament/water_unlit.filamat app/src/main/materials/water_unlit.mat
+          ls -l app/src/main/assets/filament/
+
       - name: Build Debug APK
         run: gradle assembleDebug --stacktrace --no-daemon
 
