@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string-array name="grid_names">
+        <item>Agni (red principal)</item>
+        <item>Aditi (red beta)</item>
+    </string-array>
+</resources>

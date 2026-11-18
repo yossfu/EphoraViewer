@@ -1,0 +1,6 @@
+// Ephora Viewer — proyecto desde cero (Kotlin + Filament).
+// Sin código descompilado: todo lo que hay aquí se escribió para este proyecto.
+plugins {
+    id("com.android.application") version "8.1.4" apply false
+    id("org.jetbrains.kotlin.android") version "1.9.22" apply false
+}
