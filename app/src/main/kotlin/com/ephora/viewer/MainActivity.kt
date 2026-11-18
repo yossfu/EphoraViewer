@@ -17,6 +17,9 @@ import com.ephora.viewer.auth.LoginCredentials
 import com.ephora.viewer.auth.LoginResult
 import com.ephora.viewer.auth.LoginSession
 import com.ephora.viewer.auth.SLLogin
+import com.ephora.viewer.net.ConnectionState
+import com.ephora.viewer.net.UdpCircuit
+import com.ephora.viewer.net.uiText
 import com.google.android.filament.Camera
 import com.google.android.filament.Engine
 import com.google.android.filament.EntityManager
@@ -38,7 +41,7 @@ import kotlin.math.cos
 import kotlin.math.sin
 
 /**
- * Hito M0 + M1 de Ephora Viewer.
+ * Hito M0 + M1 + M2 de Ephora Viewer.
  *
  * Lo que esta pantalla hace de verdad:
  * - Crea un motor Filament real (Engine, Renderer, Scene, View, Camera),
@@ -47,11 +50,15 @@ import kotlin.math.sin
  *   gira la cámara alrededor del cubo; si no se toca, gira solo despacio.
  * - Hito 1: login REAL con Second Life (XML-RPC contra login.cgi, ver
  *   `auth/SLLogin.kt` y `docs/login-protocol-spec.md`). La sesión queda
- *   solo en memoria; el mundo (circuito UDP) es el hito 2.
+ *   solo en memoria.
+ * - Hito 2: circuito UDP real con el simulador (ver `net/UdpCircuit.kt`
+ *   y `docs/udp-circuit-spec.md`): handshake, región, capabilities.
+ *   Tras el login no hay lobby: una pantalla de carga honesta muestra
+ *   el estado del circuito y se convierte en "Conectado" al terminar.
  *
- * Lo que NO hace (y no finge hacer): no hay mundo ni avatar todavía,
- * y ningún error se disfraza de éxito: lo que dice el servidor es lo
- * que se muestra.
+ * Lo que NO hace (y no finge hacer): todavía no hay mundo ni avatar;
+ * el cubo sigue siendo la escena de prueba hasta M3. Ningún error se
+ * disfraza de éxito: lo que dice el servidor es lo que se muestra.
  */
 class MainActivity : AppCompatActivity(), SurfaceHolder.Callback {
 
@@ -67,6 +74,12 @@ class MainActivity : AppCompatActivity(), SurfaceHolder.Callback {
     // Sesión de login real (hito 1). Solo vive en memoria: nunca se
     // guarda en disco. El circuito UDP del hito 2 la usará.
     private var currentSession: LoginSession? = null
+
+    // Circuito UDP con el simulador (hito 2) y momento del login, para
+    // el límite de 60 s de las capabilities (la info pendiente del agente
+    // solo vive 60 s en el servidor tras el login).
+    private var udpCircuit: UdpCircuit? = null
+    private var loginTimeMs: Long = 0L
 
     private lateinit var engine: Engine
     private lateinit var renderer: Renderer
@@ -123,18 +136,28 @@ class MainActivity : AppCompatActivity(), SurfaceHolder.Callback {
             loginButton.isEnabled = false
             loginStatusText.text = getString(R.string.login_connecting)
             val (mac, id0) = DeviceIdentity.getOrCreate(this)
+            loginTimeMs = System.currentTimeMillis()
             val credentials = LoginCredentials(first, last, password, start = "last", grid = grid)
             SLLogin.login(credentials, mac, id0) { result ->
                 // El callback ya llega en el hilo principal.
                 when (result) {
                     is LoginResult.Success -> {
                         currentSession = result.session // solo en memoria
-                        loginStatusText.text = getString(
-                            R.string.login_connected,
-                            result.session.firstName,
-                            result.session.lastName
-                        )
-                        loginButton.isEnabled = true
+                        // Hito 2: sin lobby. Del login a la pantalla de carga
+                        // honesta del circuito UDP; el cubo de Filament sigue
+                        // girando detrás hasta M3.
+                        val circuit = UdpCircuit(result.session.simIp, result.session.simPort, result.session, loginTimeMs)
+                        udpCircuit = circuit
+                        circuit.onStateChanged = { st ->
+                            loginStatusText.text = st.uiText() + when (st) {
+                                is ConnectionState.Connected -> " (${st.position.first}, ${st.position.second}, ${st.position.third})"
+                                else -> ""
+                            }
+                            // Si el handshake falla, el botón vuelve a activarse
+                            // para reintentar el login manualmente.
+                            if (st is ConnectionState.Failed) loginButton.isEnabled = true
+                        }
+                        circuit.start()
                     }
                     is LoginResult.Failure -> {
                         // Mensaje del servidor tal cual; nunca se inventa el motivo.
@@ -289,6 +312,9 @@ class MainActivity : AppCompatActivity(), SurfaceHolder.Callback {
 
     override fun onDestroy() {
         super.onDestroy()
+        // Cerrar el circuito UDP al salir (CloseCircuit + logout si procede).
+        udpCircuit?.stop(true)
+        udpCircuit = null
         choreographer.removeFrameCallback(frameCallback)
         swapChain?.let { engine.destroySwapChain(it) }
         swapChain = null
