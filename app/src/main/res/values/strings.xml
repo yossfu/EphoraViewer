@@ -2,12 +2,15 @@
 <resources>
     <string name="app_name">Ephora Viewer</string>
     <string name="login_title">Iniciar sesión en Second Life</string>
-    <string name="login_note">Hito 0: esta pantalla es solo el diseño. El login real con Second Life llega en el hito 1; este botón aún no conecta con nada.</string>
+    <string name="login_note">Hito 1: login real con Second Life. Tus datos viajan por HTTPS y la contraseña nunca se guarda.</string>
     <string name="first_name_hint">Nombre</string>
     <string name="last_name_hint">Apellido</string>
     <string name="password_hint">Contraseña</string>
     <string name="grid_label">Red (grid)</string>
-    <string name="login_button_soon">Iniciar sesión (próximamente)</string>
-    <string name="scene_status_ready">Escena de prueba lista: cubo PBR con luz direccional (Filament 1.77.3). Arrastra para girar la cámara.</string>
+    <string name="login_button">Iniciar sesión</string>
+    <string name="login_connecting">Conectando con Second Life…</string>
+    <string name="login_empty_fields">Escribe nombre, apellido y contraseña.</string>
+    <string name="login_connected">Conectado como %1$s %2$s</string>
+    <string name="scene_status_ready">Escena de prueba lista: cubo PBR con luz direccional (Filament 1.56.0). Arrastra para girar la cámara.</string>
     <string name="scene_status_error">No se pudo cargar la escena de prueba (cubo). Filament está activo, pero el modelo no se cargó.</string>
 </resources>

@@ -7,8 +7,16 @@ import android.view.MotionEvent
 import android.view.SurfaceHolder
 import android.view.SurfaceView
 import android.widget.Button
+import android.widget.EditText
+import android.widget.Spinner
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
+import com.ephora.viewer.auth.DeviceIdentity
+import com.ephora.viewer.auth.Grid
+import com.ephora.viewer.auth.LoginCredentials
+import com.ephora.viewer.auth.LoginResult
+import com.ephora.viewer.auth.LoginSession
+import com.ephora.viewer.auth.SLLogin
 import com.google.android.filament.Camera
 import com.google.android.filament.Engine
 import com.google.android.filament.EntityManager
@@ -30,18 +38,20 @@ import kotlin.math.cos
 import kotlin.math.sin
 
 /**
- * Hito M0 de Ephora Viewer.
+ * Hito M0 + M1 de Ephora Viewer.
  *
  * Lo que esta pantalla hace de verdad:
  * - Crea un motor Filament real (Engine, Renderer, Scene, View, Camera),
  *   carga el cubo de prueba `assets/cube.glb` con gltfio, lo ilumina con
  *   una luz direccional y lo renderiza en el SurfaceView. Arrastrar el dedo
  *   gira la cámara alrededor del cubo; si no se toca, gira solo despacio.
- * - Muestra el formulario de login en diseño (nombre, apellido, contraseña,
- *   red), con el botón DESACTIVADO.
+ * - Hito 1: login REAL con Second Life (XML-RPC contra login.cgi, ver
+ *   `auth/SLLogin.kt` y `docs/login-protocol-spec.md`). La sesión queda
+ *   solo en memoria; el mundo (circuito UDP) es el hito 2.
  *
- * Lo que NO hace (y no finge hacer): no hay login real, no hay conexión a
- * Second Life, no hay mundo ni avatar. El login real con LLSD es el hito 1.
+ * Lo que NO hace (y no finge hacer): no hay mundo ni avatar todavía,
+ * y ningún error se disfraza de éxito: lo que dice el servidor es lo
+ * que se muestra.
  */
 class MainActivity : AppCompatActivity(), SurfaceHolder.Callback {
 
@@ -53,6 +63,10 @@ class MainActivity : AppCompatActivity(), SurfaceHolder.Callback {
 
     private lateinit var surfaceView: SurfaceView
     private lateinit var sceneStatusText: TextView
+
+    // Sesión de login real (hito 1). Solo vive en memoria: nunca se
+    // guarda en disco. El circuito UDP del hito 2 la usará.
+    private var currentSession: LoginSession? = null
 
     private lateinit var engine: Engine
     private lateinit var renderer: Renderer
@@ -85,10 +99,51 @@ class MainActivity : AppCompatActivity(), SurfaceHolder.Callback {
         surfaceView = findViewById(R.id.filament_surface)
         sceneStatusText = findViewById(R.id.text_scene_status)
 
-        // El botón de login está desactivado: el login real llega en el hito 1.
-        // No hay ningún intento de autenticación en M0.
+        // Hito 1: login REAL con Second Life (nada simulado).
+        // En M0 este botón estaba desactivado; ahora conecta de verdad
+        // contra login.cgi (ver auth/SLLogin.kt).
+        val firstNameInput: EditText = findViewById(R.id.edit_first_name)
+        val lastNameInput: EditText = findViewById(R.id.edit_last_name)
+        val passwordInput: EditText = findViewById(R.id.edit_password)
+        val gridSpinner: Spinner = findViewById(R.id.spinner_grid)
+        val loginStatusText: TextView = findViewById(R.id.text_login_status)
         val loginButton: Button = findViewById(R.id.button_login)
-        loginButton.isEnabled = false
+        loginButton.isEnabled = true
+        loginButton.setOnClickListener {
+            val first = firstNameInput.text.toString().trim()
+            // Apellido vacío = "Resident" (cuentas nuevas sin apellido).
+            val last = lastNameInput.text.toString().trim().ifEmpty { "Resident" }
+            // La contraseña no se recorta: puede llevar espacios.
+            val password = passwordInput.text.toString()
+            if (first.isEmpty() || password.isEmpty()) {
+                loginStatusText.text = getString(R.string.login_empty_fields)
+                return@setOnClickListener
+            }
+            val grid = if (gridSpinner.selectedItemPosition == 1) Grid.ADITI else Grid.AGNI
+            loginButton.isEnabled = false
+            loginStatusText.text = getString(R.string.login_connecting)
+            val (mac, id0) = DeviceIdentity.getOrCreate(this)
+            val credentials = LoginCredentials(first, last, password, start = "last", grid = grid)
+            SLLogin.login(credentials, mac, id0) { result ->
+                // El callback ya llega en el hilo principal.
+                when (result) {
+                    is LoginResult.Success -> {
+                        currentSession = result.session // solo en memoria
+                        loginStatusText.text = getString(
+                            R.string.login_connected,
+                            result.session.firstName,
+                            result.session.lastName
+                        )
+                        loginButton.isEnabled = true
+                    }
+                    is LoginResult.Failure -> {
+                        // Mensaje del servidor tal cual; nunca se inventa el motivo.
+                        loginStatusText.text = result.message
+                        loginButton.isEnabled = true
+                    }
+                }
+            }
+        }
 
         // Obligatorio según la documentación oficial de Filament:
         // "You must always first initialize Filament by calling Filament.init()".
