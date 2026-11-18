@@ -3,6 +3,7 @@ package com.ephora.viewer.auth
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import com.ephora.viewer.util.AppLog
 import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.SocketTimeoutException
@@ -67,18 +68,25 @@ object SLLogin {
         fun post(r: LoginResult) = mainHandler.post { onResult(r) }
         Thread(Runnable {
             try {
+                AppLog.add("LOGIN", "Login: POST ${credentials.grid.name}")
                 val r = doLoginBlocking(credentials, mac, id0)
+                if (r is LoginResult.Success) AppLog.add("LOGIN", "Login: éxito (sesión en memoria)")
+                else if (r is LoginResult.Failure) AppLog.add("LOGIN", "Login: fallo (${r.reason}): ${r.message}")
                 post(r)
             } catch (e: SocketTimeoutException) {
+                AppLog.add("LOGIN", "Login: timeout de red")
                 post(LoginResult.Failure("network", "Tiempo de espera agotado al contactar con el servidor de login. Revisa tu conexión e inténtalo de nuevo."))
             } catch (e: UnknownHostException) {
+                AppLog.add("LOGIN", "Login: no se resolvió el servidor")
                 post(LoginResult.Failure("network", "Sin conexión o no se pudo resolver el servidor de login. Revisa tu conexión."))
             } catch (e: IOException) {
-                // No se incluye body ni datos sensibles, solo mensaje corto de red.
+                AppLog.add("LOGIN", "Login: error de red")
                 post(LoginResult.Failure("network", "Error de red al contactar con el servidor de login."))
             } catch (e: XmlRpcFault) {
+                AppLog.add("LOGIN", "Login: fault ${e.faultCode}")
                 post(LoginResult.Failure("invalid_response", "Respuesta de fallo del servidor (fault ${e.faultCode}): ${e.faultString}"))
             } catch (e: Exception) {
+                AppLog.add("LOGIN", "Login: respuesta inválida")
                 post(LoginResult.Failure("invalid_response", "Respuesta inválida del servidor de login."))
             }
         }).start()

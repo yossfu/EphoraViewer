@@ -1,15 +1,24 @@
 package com.ephora.viewer
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.content.Intent
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import android.view.Choreographer
 import android.view.MotionEvent
 import android.view.SurfaceHolder
 import android.view.SurfaceView
+import android.view.View as AndroidView
 import android.widget.Button
 import android.widget.EditText
+import android.widget.ScrollView
 import android.widget.Spinner
 import android.widget.TextView
+import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import com.ephora.viewer.auth.DeviceIdentity
 import com.ephora.viewer.auth.Grid
@@ -20,6 +29,7 @@ import com.ephora.viewer.auth.SLLogin
 import com.ephora.viewer.net.ConnectionState
 import com.ephora.viewer.net.UdpCircuit
 import com.ephora.viewer.net.uiText
+import com.ephora.viewer.util.AppLog
 import com.google.android.filament.Camera
 import com.google.android.filament.Engine
 import com.google.android.filament.EntityManager
@@ -55,6 +65,10 @@ import kotlin.math.sin
  *   y `docs/udp-circuit-spec.md`): handshake, región, capabilities.
  *   Tras el login no hay lobby: una pantalla de carga honesta muestra
  *   el estado del circuito y se convierte en "Conectado" al terminar.
+ * - M2.1: panel de registro retráctil (botón flotante "Log"): muestra en
+ *   vivo lo que pasa por dentro (login, paquetes UDP, handshake, caps)
+ *   con botones para copiarlo, compartirlo y limpiarlo. El registro
+ *   nunca contiene session_id, agent_id ni circuit_code.
  *
  * Lo que NO hace (y no finge hacer): todavía no hay mundo ni avatar;
  * el cubo sigue siendo la escena de prueba hasta M3. Ningún error se
@@ -80,6 +94,10 @@ class MainActivity : AppCompatActivity(), SurfaceHolder.Callback {
     // solo vive 60 s en el servidor tras el login).
     private var udpCircuit: UdpCircuit? = null
     private var loginTimeMs: Long = 0L
+
+    // Panel de registro retráctil (M2.1): refresco en vivo del texto.
+    private val logHandler = Handler(Looper.getMainLooper())
+    private var logRunnable: Runnable? = null
 
     private lateinit var engine: Engine
     private lateinit var renderer: Renderer
@@ -166,6 +184,49 @@ class MainActivity : AppCompatActivity(), SurfaceHolder.Callback {
                     }
                 }
             }
+        }
+
+        // Panel de registro retráctil (M2.1): botón flotante "Log" que abre
+        // un panel con el registro en vivo (AppLog), con Copiar, Compartir,
+        // Limpiar y Cerrar. El registro nunca contiene session_id, agent_id
+        // ni circuit_code.
+        val logPanel: AndroidView = findViewById(R.id.log_panel)
+        val logText: TextView = findViewById(R.id.text_log)
+        val logScroll: ScrollView = findViewById(R.id.scroll_log)
+        val showLogButton: Button = findViewById(R.id.button_show_log)
+        val refresh = object : Runnable {
+            override fun run() {
+                if (logPanel.visibility == AndroidView.VISIBLE) {
+                    logText.text = AppLog.snapshot().ifEmpty { getString(R.string.log_empty) }
+                    logScroll.post { logScroll.fullScroll(AndroidView.FOCUS_DOWN) }
+                    logHandler.postDelayed(this, 500)
+                }
+            }
+        }
+        logRunnable = refresh
+        showLogButton.setOnClickListener {
+            logPanel.visibility = AndroidView.VISIBLE
+            logHandler.post(refresh)
+        }
+        findViewById<Button>(R.id.button_close_log).setOnClickListener {
+            logPanel.visibility = AndroidView.GONE
+            logHandler.removeCallbacks(refresh)
+        }
+        findViewById<Button>(R.id.button_clear_log).setOnClickListener {
+            AppLog.clear()
+        }
+        findViewById<Button>(R.id.button_copy_log).setOnClickListener {
+            val clip = ClipData.newPlainText("Ephora log", AppLog.snapshot())
+            (getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(clip)
+            Toast.makeText(this, R.string.log_copied, Toast.LENGTH_SHORT).show()
+        }
+        findViewById<Button>(R.id.button_share_log).setOnClickListener {
+            val share = Intent(Intent.ACTION_SEND).apply {
+                type = "text/plain"
+                putExtra(Intent.EXTRA_SUBJECT, "Ephora Viewer — registro")
+                putExtra(Intent.EXTRA_TEXT, AppLog.snapshot())
+            }
+            startActivity(Intent.createChooser(share, getString(R.string.log_share)))
         }
 
         // Obligatorio según la documentación oficial de Filament:
@@ -312,6 +373,7 @@ class MainActivity : AppCompatActivity(), SurfaceHolder.Callback {
 
     override fun onDestroy() {
         super.onDestroy()
+        logRunnable?.let { logHandler.removeCallbacks(it) }
         // Cerrar el circuito UDP al salir (CloseCircuit + logout si procede).
         udpCircuit?.stop(true)
         udpCircuit = null

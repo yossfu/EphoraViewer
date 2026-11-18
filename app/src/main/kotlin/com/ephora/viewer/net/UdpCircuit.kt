@@ -4,6 +4,7 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import com.ephora.viewer.auth.LoginSession
+import com.ephora.viewer.util.AppLog
 import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.InetAddress
@@ -58,6 +59,7 @@ class UdpCircuit(
 
     private fun setState(s: ConnectionState) {
         state = s
+        AppLog.add("UDP", "Estado: ${s.uiText()}")
         mainHandler.post { onStateChanged?.invoke(s) }
     }
 
@@ -85,6 +87,7 @@ class UdpCircuit(
         }
         Thread(Runnable { recvLoop() }).start()
         Thread(Runnable { tickLoop() }).start()
+        AppLog.add("UDP", "Circuito: abriendo UDP hacia $simIp:$simPort")
         // Paso 1: UseCircuitCode fiable. CompleteAgentMovement se envía SOLO
         // cuando llega el ACK de UseCircuitCode (así lo hacen libomv y Lumiya:
         // el sim descarta paquetes de un agente sin circuito abierto).
@@ -139,12 +142,14 @@ class UdpCircuit(
         val s = nextSeq()
         val d = SLPacket.buildDatagram(s, freq, msgId, body, true, zc)
         synchronized(needAck) { needAck[s] = Pend(freq, msgId, body, zc, 0, System.currentTimeMillis()) }
+        AppLog.add("UDP", "→ ${MessageTypes.name(freq, msgId)} seq=$s ${d.size} B fiable")
         sendRaw(d)
         return s
     }
 
     fun sendUnreliable(freq: Frequency, msgId: Int, body: ByteArray, zc: Boolean) {
         val d = SLPacket.buildDatagram(nextSeq(), freq, msgId, body, false, zc)
+        AppLog.add("UDP", "→ ${MessageTypes.name(freq, msgId)} ${d.size} B")
         sendRaw(d)
     }
 
@@ -163,6 +168,7 @@ class UdpCircuit(
         synchronized(needAck) { needAck.remove(ackedSeq) }
         if (ackedSeq == useCircuitSeq && !completeSent) {
             completeSent = true
+            AppLog.add("UDP", "ACK UseCircuitCode seq=$ackedSeq → enviando CompleteAgentMovement")
             sendReliable(Frequency.LOW, MessageTypes.COMPLETE_AGENT_MOVEMENT_LOW, buildCompleteMoveBody(), false)
         }
     }
@@ -179,13 +185,21 @@ class UdpCircuit(
                 } catch (_: java.net.SocketTimeoutException) {
                     continue
                 }
-                if (p.address.hostAddress != simIp || p.port != simPort) continue // validar origen.
+                if (p.address.hostAddress != simIp || p.port != simPort) {
+                    AppLog.add("UDP", "Paquete de origen distinto (${p.address.hostAddress}:${p.port}), ignorado")
+                    continue // validar origen.
+                }
                 lastRecvTime = System.currentTimeMillis()
                 val dec = try {
                     SLPacket.parseDatagram(p.data.copyOf(p.length), p.length)
                 } catch (e: Exception) {
+                    AppLog.add("UDP", "Paquete no decodificado (${p.length} B): ${e.message}")
                     continue
                 }
+                AppLog.add("UDP", "← ${MessageTypes.name(dec.frequency, dec.messageId)} seq=${dec.sequence} ${p.length} B" +
+                    (if (dec.flags and SlFlags.RELIABLE != 0) " fiable" else "") +
+                    (if (dec.flags and SlFlags.ZEROCODED != 0) " zerocoded" else "") +
+                    (if (dec.appendedAcks.isNotEmpty()) " +${dec.appendedAcks.size} ACKs" else ""))
                 val isRel = (dec.flags and SlFlags.RELIABLE) != 0
                 if (isRel) {
                     var dup = false
@@ -226,6 +240,7 @@ class UdpCircuit(
                 try {
                     val info = RegionHandshake.parseHandshake(d.body)
                     regionInfo = info
+                    AppLog.add("UDP", "RegionHandshake: '${info.simName}' agua=${info.waterHeight} acceso=${info.simAccess}")
                     // Validación D1: SimName legible + WaterHeight sensata => zerocode OK.
                     val reply = RegionHandshake.buildReply(session.agentId, session.sessionId, 4L) // D6: 4 SelfAppearanceSupport (Lumiya 0). Si falla, probar 0.
                     sendReliable(Frequency.LOW, MessageTypes.REGION_HANDSHAKE_REPLY_LOW, reply, true) // D4: fiable por prudencia, SIN VERIFICAR.
@@ -233,6 +248,7 @@ class UdpCircuit(
                     gotHandshake = true
                     afterHandshakeProgress()
                 } catch (e: Exception) {
+                    AppLog.add("UDP", "RegionHandshake: parse falló: ${e.message}")
                     Log.w(TAG, "handshake parse fallo")
                 }
             }
@@ -240,9 +256,11 @@ class UdpCircuit(
                 try {
                     val m = RegionHandshake.parseMovementComplete(d.body)
                     movementInfo = m
+                    AppLog.add("UDP", "MovementComplete pos=(${m.position[0]}, ${m.position[1]}, ${m.position[2]}) canal='${m.channelVersion}'")
                     gotMovement = true
                     afterHandshakeProgress()
-                } catch (_: Exception) {
+                } catch (e: Exception) {
+                    AppLog.add("UDP", "MovementComplete: parse falló: ${e.message}")
                 }
             }
             d.frequency == Frequency.HIGH && d.messageId == MessageTypes.START_PING_CHECK_HIGH -> {
@@ -310,6 +328,8 @@ class UdpCircuit(
                 if (!running) return@post
                 if (res != null) {
                     synchronized(capsUrls) { capsUrls.clear(); capsUrls.putAll(res) }
+                    val missing = CapsClient.MIN_CAPS.filter { !res.containsKey(it) }
+                    AppLog.add("CAPS", "Capabilities: ${res.size} recibidas" + if (missing.isEmpty()) "" else " (faltan: ${missing.joinToString(", ")})")
                     val ri = regionInfo
                     val mi = movementInfo
                     val rn = ri?.simName ?: "región"
@@ -317,6 +337,7 @@ class UdpCircuit(
                     val p = mi?.position
                     setState(ConnectionState.Connected(an, rn, if (p != null) Triple(p[0], p[1], p[2]) else Triple(0f, 0f, 0f)))
                 } else {
+                    AppLog.add("CAPS", "Capabilities: falló (3 intentos o 60 s desde el login)")
                     setState(ConnectionState.Failed("No se pudieron pedir capabilities (3 intentos o 60 s)."))
                 }
             }
@@ -329,10 +350,12 @@ class UdpCircuit(
                 Thread.sleep(100)
                 val now = System.currentTimeMillis()
                 if (now - handshakeStart > 60000 && state !is ConnectionState.Connected && state !is ConnectionState.Failed && state !is ConnectionState.Disconnected) {
+                    AppLog.add("UDP", "Handshake agotado (60 s sin completar)")
                     setState(ConnectionState.Failed("Handshake agotado (60 s sin completar)."))
                     continue
                 }
                 if (now - lastRecvTime > 30000 && state !is ConnectionState.Failed && state !is ConnectionState.Disconnected) {
+                    AppLog.add("UDP", "Sin paquetes del sim 30 s (SIMULATOR_TIMEOUT)")
                     setState(ConnectionState.Failed("Se perdió la conexión con la región (30 s sin paquetes)."))
                     continue
                 }
@@ -342,6 +365,7 @@ class UdpCircuit(
                 for ((s, p) in toResend) {
                     if (p.attempts >= 3) {
                         synchronized(needAck) { needAck.remove(s) }
+                        AppLog.add("UDP", "Sin ACK seq=$s tras 3 intentos")
                         if (state is ConnectionState.OpeningCircuit || state is ConnectionState.WaitingHandshake) {
                             setState(ConnectionState.Failed("Sin ACK del simulador (60 s)."))
                         }
@@ -349,6 +373,7 @@ class UdpCircuit(
                     }
                     p.attempts++
                     p.lastSent = now
+                    AppLog.add("UDP", "Retransmitiendo ${MessageTypes.name(p.freq, p.msgId)} seq=$s intento ${p.attempts}")
                     try {
                         val d = SLPacket.buildDatagram(s, p.freq, p.msgId, p.body, true, p.zc, true)
                         sendRaw(d)

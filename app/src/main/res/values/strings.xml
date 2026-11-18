@@ -12,4 +12,12 @@
     <string name="login_empty_fields">Escribe nombre, apellido y contraseña.</string>
     <string name="scene_status_ready">Escena de prueba lista: cubo PBR con luz direccional (Filament 1.56.0). Arrastra para girar la cámara.</string>
     <string name="scene_status_error">No se pudo cargar la escena de prueba (cubo). Filament está activo, pero el modelo no se cargó.</string>
+    <string name="log_title">Registro</string>
+    <string name="log_show">Log</string>
+    <string name="log_copy">Copiar</string>
+    <string name="log_share">Compartir</string>
+    <string name="log_clear">Limpiar</string>
+    <string name="log_close">Cerrar</string>
+    <string name="log_copied">Registro copiado al portapapeles.</string>
+    <string name="log_empty">Sin entradas todavía. Haz login y el registro irá apareciendo aquí.</string>
 </resources>

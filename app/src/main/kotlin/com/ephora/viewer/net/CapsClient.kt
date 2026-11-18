@@ -2,6 +2,7 @@ package com.ephora.viewer.net
 
 import android.os.Handler
 import android.os.Looper
+import com.ephora.viewer.util.AppLog
 import java.net.HttpURLConnection
 import java.net.URL
 
@@ -37,19 +38,23 @@ object CapsClient {
                 c.setFixedLengthStreamingMode(b.size)
                 c.outputStream.use { it.write(b) }
                 if (c.responseCode != 200) {
+                    AppLog.add("CAPS", "Intento ${attempt + 1}: HTTP ${c.responseCode}")
                     attempt++
                     continue
                 }
                 val resp = c.inputStream.bufferedReader(Charsets.UTF_8).readText()
                 try { c.disconnect() } catch (_: Exception) {}
                 if (resp.isBlank()) {
+                    AppLog.add("CAPS", "Intento ${attempt + 1}: respuesta vacía")
                     attempt++
                     continue
                 }
                 val m = LlsdXml.parseStringMap(resp)
+                AppLog.add("CAPS", "Intento ${attempt + 1}: OK, ${m.size} capabilities")
                 synchronized(lastCaps) { lastCaps.clear(); lastCaps.putAll(m) }
                 return m
             } catch (e: Exception) {
+                AppLog.add("CAPS", "Intento ${attempt + 1}: falló (${e.message})")
                 attempt++
                 try { Thread.sleep(500) } catch (_: Exception) {}
             }
